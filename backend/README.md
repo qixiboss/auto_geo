@@ -1,5 +1,7 @@
 # AutoGeo 后端服务
 
+> FastAPI + Playwright 智能文章发布系统后端
+
 ## 快速开始
 
 ### 1. 安装依赖
@@ -9,9 +11,15 @@ cd backend
 pip install -r requirements.txt
 ```
 
-### 2. 初始化Playwright
+### 2. 安装 Playwright 浏览器
 
 ```bash
+playwright install chromium
+```
+
+如果下载慢，使用国内镜像：
+```bash
+set PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/
 playwright install chromium
 ```
 
@@ -21,11 +29,11 @@ playwright install chromium
 python main.py
 ```
 
-服务将在 `http://127.0.0.1:8001` 启动
+**服务地址**：`http://127.0.0.1:8001`
 
-API文档: `http://127.0.0.1:8001/docs`
+**API文档**：`http://127.0.0.1:8001/docs`
 
-## API接口
+## API 接口
 
 ### 账号管理
 
@@ -38,28 +46,8 @@ API文档: `http://127.0.0.1:8001/docs`
 | DELETE | `/api/accounts/{id}` | 删除账号 |
 | POST | `/api/accounts/auth/start` | 开始授权 |
 | GET | `/api/accounts/auth/status/{task_id}` | 查询授权状态 |
-| POST | `/api/accounts/auth/confirm/{task_id}` | **手动确认授权完成** |
-| POST | `/api/accounts/auth/save/{task_id}` | 保存授权结果（已废弃） |
+| POST | `/api/accounts/auth/confirm/{task_id}` | 确认授权完成 |
 | DELETE | `/api/accounts/auth/task/{task_id}` | 取消授权任务 |
-
-> **授权流程说明**（v1.0 - 2026-01-09更新）：
-> 1. 调用 `/api/accounts/auth/start` 打开浏览器
-> 2. 浏览器自动打开两个标签页：
->    - 标签1：目标平台登录页（如知乎）
->    - 标签2：本地控制页（紫色背景，带授权按钮）
-> 3. 用户在标签1中手动完成登录
-> 4. 用户切换到标签2，点击"完成授权"按钮
-> 5. 系统自动提取并保存关键登录cookies
-> 6. 授权成功后浏览器自动关闭
->
-> **核心特性**：
-> - ✅ 使用 `expose_function` 绕过CORS限制
-> - ✅ **全量保存cookies**（按调研文档建议，不精简）
-> - ✅ 严格登录验证（只检查最核心的关键cookie）
-> - ✅ AES-256加密存储cookies
-> - ✅ 授权成功自动关闭浏览器
->
-> **详细文档**：参见 `.claude/docs/AUTH-FEATURE.md` 和 `.claude/docs/COOKIE_RESEARCH.md`
 
 ### 文章管理
 
@@ -71,13 +59,22 @@ API文档: `http://127.0.0.1:8001/docs`
 | PUT | `/api/articles/{id}` | 更新文章 |
 | DELETE | `/api/articles/{id}` | 删除文章 |
 
-### 其他
+### 发布管理
 
 | 方法 | 路径 | 说明 |
 |-----|------|------|
+| POST | `/api/publish/start` | 开始发布任务 |
+| GET | `/api/publish/status/{task_id}` | 查询发布状态 |
+| DELETE | `/api/publish/task/{task_id}` | 取消发布任务 |
+
+### 其他接口
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/` | 服务信息 |
 | GET | `/api/health` | 健康检查 |
-| GET | `/api/platforms` | 获取支持的平台 |
-| WS | `/ws` | WebSocket连接 |
+| GET | `/api/platforms` | 支持的平台列表 |
+| WS | `/ws` | WebSocket 连接 |
 
 ## 目录结构
 
@@ -86,21 +83,26 @@ backend/
 ├── main.py                 # 服务入口
 ├── config.py               # 配置文件
 ├── requirements.txt        # 依赖清单
-├── api/                    # API路由
-│   ├── account.py          # 账号API
-│   └── article.py          # 文章API
+├── api/                    # API 路由
+│   ├── account.py          # 账号 API
+│   ├── article.py          # 文章 API
+│   └── publish.py          # 发布 API
 ├── database/               # 数据库
-│   ├── __init__.py         # 连接管理
 │   └── models.py           # 数据模型
-├── schemas/                # Pydantic模型
-│   └── __init__.py         # 请求/响应定义
+├── schemas/                # Pydantic 模型
 └── services/               # 业务服务
-    ├── crypto.py           # 加密服务
-    └── playwright_mgr.py   # 浏览器管理
+    └── playwright/         # Playwright 服务
+        └── publishers/      # 各平台发布器
 ```
 
 ## 开发说明
 
-- 数据库文件: `backend/database/auto_geo.db`
-- Cookie存储: `.cookies/`
-- 日志文件: `logs/auto_geo.log`
+### 数据存储
+
+- **数据库文件**: `database/auto_geo.db`
+- **Cookie存储**: `../.cookies/` 目录
+- **日志文件**: `../logs/auto_geo.log`
+
+---
+
+**更新日期**: 2025-01-13

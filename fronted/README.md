@@ -1,6 +1,6 @@
 # AutoGeo 前端
 
-> 老王备注：这个项目用 Electron + Vue3 + Vite 搞的桌面应用前端
+> Electron + Vue3 + TypeScript 桌面应用前端
 
 ## 技术栈
 
@@ -13,27 +13,11 @@
 | Pinia | ^2.1.7 | Vue 官方状态管理 |
 | Element Plus | ^2.5.0 | Vue 3 组件库 |
 
-## 目录结构
-
-```
-fronted/
-├── electron/              # Electron 主进程代码
-│   ├── main/             #   主进程入口
-│   └── preload/          #   预加载脚本
-├── src/                  # 渲染进程源码
-│   ├── components/      #   Vue 组件
-│   ├── views/           #   页面视图
-│   ├── stores/          #   Pinia 状态管理
-│   ├── services/        #   API 服务
-│   └── types/           #   TypeScript 类型定义
-├── scripts/             # 构建脚本
-│   └── dev.js          #   开发启动脚本
-├── package.json         # 依赖配置
-├── vite.config.ts       # Vite 配置
-└── tsconfig.json        # TypeScript 配置
-```
-
 ## 快速开始
+
+### 前置要求
+
+⚠️ **启动前端前，必须先启动后端服务！**
 
 ### 1. 安装依赖
 
@@ -48,15 +32,10 @@ npm install
 npm run dev
 ```
 
-这会同时启动：
-- Vite 开发服务器（http://127.0.0.1:5173）
-- Electron 桌面窗口
-
-### 3. 构建生产版本
-
-```bash
-npm run build
-```
+这会自动：
+- 编译 Electron 主进程代码
+- 启动 Vite 开发服务器（http://127.0.0.1:5173）
+- 打开 Electron 桌面窗口
 
 ## 可用脚本
 
@@ -70,31 +49,58 @@ npm run build
 | `npm run type-check` | TypeScript 类型检查 |
 | `npm run lint` | ESLint 代码检查 |
 
-## 开发注意事项
+## 目录结构
 
-### 端口配置
+```
+fronted/
+├── electron/              # Electron 主进程代码
+│   ├── main/             #   主进程入口
+│   │   ├── index.ts      #     主入口
+│   │   ├── backend-manager.ts  # 后端管理
+│   │   ├── window-manager.ts   # 窗口管理
+│   │   ├── ipc-handlers.ts     # IPC 处理器
+│   │   └── tray-manager.ts     # 托盘管理
+│   └── preload/          #   预加载脚本
+├── src/                  # 渲染进程源码
+│   ├── components/      #   Vue 组件
+│   ├── views/           #   页面视图
+│   ├── stores/          #   Pinia 状态管理
+│   ├── services/        #   API 服务
+│   └── types/           #   TypeScript 类型定义
+├── scripts/             # 构建脚本
+│   └── dev.js          #   开发启动脚本
+├── package.json         # 依赖配置
+├── vite.config.ts       # Vite 配置
+└── tsconfig.json        # TypeScript 配置
+```
 
-- Vite 开发服务器默认运行在 `http://127.0.0.1:5173`
-- API 代理指向 `http://127.0.0.1:8001`
+## 端口配置
 
-### Electron 通信
+| 服务 | 地址 |
+|------|------|
+| Vite 开发服务器 | http://127.0.0.1:5173 |
+| 后端 API（需先启动） | http://127.0.0.1:8001 |
+| WebSocket | ws://127.0.0.1:8001/ws |
 
-主进程与渲染进程通过 IPC 通信，具体通道定义见：
-- `electron/main/ipc-handlers.ts` - 主进程处理器
-- `electron/preload/index.ts` - 预加载暴露 API
+## 常见问题
 
-### 依赖问题排查
+### Q: 启动后提示 "ECONNREFUSED 127.0.0.1:8001"？
 
-如果启动时遇到依赖错误：
-
+A: 后端服务没有启动。请先在另一个终端启动后端：
 ```bash
-# 1. 清理 node_modules 和锁文件
+cd ../backend
+python main.py
+```
+
+### Q: TypeScript 编译报错？
+
+A: 运行 `npm run build:electron` 单独编译 Electron 主进程。
+
+### Q: npm install 报错？
+
+A: 尝试清理缓存重装：
+```bash
 rm -rf node_modules package-lock.json
-
-# 2. 重新安装
-npm install
-
-# 3. 如果还有问题，尝试清理 npm 缓存
 npm cache clean --force
 npm install
 ```
