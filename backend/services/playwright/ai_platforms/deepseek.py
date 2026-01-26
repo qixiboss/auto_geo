@@ -6,7 +6,6 @@ DeepSeek检测器
 
 from typing import Dict, Any
 from playwright.async_api import Page
-from loguru import logger
 import asyncio
 
 from .base import AIPlatformChecker
@@ -19,12 +18,26 @@ class DeepSeekChecker(AIPlatformChecker):
     URL: https://chat.deepseek.com
     """
 
-    # DeepSeek的选择器
     SELECTORS = {
-        "input_box": "textarea[placeholder*='输入']",
-        "submit_button": "button[type='submit']",
-        "answer_area": "[class*='answer']",
-        "chat_message": "[class*='message']",
+        "input_box": [
+            "textarea[placeholder*='输入']",
+            "textarea[data-placeholder*='输入']",
+            "textarea[class*='input']",
+            "textarea[class*='chat-input']",
+            "textarea[role='textbox']"
+        ],
+        "submit_button": [
+            "button[type='submit']",
+            "button[aria-label*='发送']",
+            "button[class*='send']",
+            "[class*='submit'] button"
+        ],
+        "new_chat": [
+            "[class*='new-chat']",
+            "[class*='new-conversation']",
+            "[class*='new-dialog']",
+            "[class*='create-chat']"
+        ]
     }
 
     async def check(
@@ -36,90 +49,122 @@ class DeepSeekChecker(AIPlatformChecker):
     ) -> Dict[str, Any]:
         """
         检测DeepSeek收录情况
+
+        Returns:
+            检测结果详细信息
         """
+        self._log("info", f"开始检测, 问题: {question[:50]}...")
+        self._log("info", f"目标关键词: {keyword}, 公司: {company}")
+
         try:
-            # 1. 导航到DeepSeek
-            if not await self.navigate_to_page(page):
+            async def navigate_operation():
+                if await self.navigate_to_page(page):
+                    return {"success": True}
+                return {"success": False, "error_msg": "导航失败"}
+
+            nav_result = await self._retry_operation(
+                navigate_operation,
+                "导航到DeepSeek",
+                max_retries=2
+            )
+
+            if not nav_result["success"]:
                 return {
                     "success": False,
                     "answer": None,
                     "keyword_found": False,
                     "company_found": False,
-                    "error_msg": "导航失败"
+                    "error_msg": nav_result.get("error_msg", "导航失败")
                 }
 
-            # 2. 清理聊天历史
-            await self.clear_chat_history(page)
+            async def clear_operation():
+                if await self.clear_chat_history(page):
+                    return {"success": True}
+                return {"success": False, "error_msg": "清理失败"}
 
-            # 3. 等待输入框加载
-            input_selector = self.SELECTORS["input_box"]
-            if not await self.wait_for_selector(page, input_selector, 15000):
-                input_selector = "textarea"
-                if not await self.wait_for_selector(page, input_selector, 10000):
-                    return {
-                        "success": False,
-                        "answer": None,
-                        "keyword_found": False,
-                        "company_found": False,
-                        "error_msg": "输入框未找到"
-                    }
+            await self._retry_operation(
+                clear_operation,
+                "清理聊天历史",
+                max_retries=1
+            )
 
-            # 4. 输入问题
-            await page.fill(input_selector, question)
+            input_selectors = self.SELECTORS["input_box"]
+
+            success, matched_selector = await self.wait_for_selector(
+                page,
+                input_selectors,
+                timeout=20000
+            )
+
+            if not success:
+                self._log("error", "未找到输入框")
+                return {
+                    "success": False,
+                    "answer": None,
+                    "keyword_found": False,
+                    "company_found": False,
+                    "error_msg": "输入框未找到"
+                }
+
+            self._log("info", f"找到输入框: {matched_selector}")
+
+            await page.fill(matched_selector, question)
             await asyncio.sleep(0.5)
-            logger.info(f"DeepSeek已输入问题: {question[:30]}...")
+            self._log("info", f"已输入问题: {question[:30]}...")
 
-            # 5. 记录当前页面状态，用于智能等待
             initial_content = await page.inner_text("body")
 
-            # 6. 提交（按Enter键）
             await page.keyboard.press("Enter")
-            logger.info("DeepSeek已提交问题")
+            self._log("info", "已提交问题")
 
-            # 7. 智能等待回答生成完成
-            await self.wait_for_answer_generation(page, initial_content, timeout=40000)
+            wait_result = await self.wait_for_answer_generation(
+                page,
+                initial_content,
+                timeout=60000,
+                check_interval=2.0
+            )
 
-            # 8. 获取回答内容
-            answer_selectors = [
-                self.SELECTORS["answer_area"],
-                self.SELECTORS["chat_message"],
-                "[class*='content']",
-                "[class*='bubble']",
-                ".markdown-body",
-                ".answer-content",
-                ".chat-content"
-            ]
+            if wait_result["success"]:
+                self._log("info", f"回答生成成功, 长度: {wait_result['content_length']} 字符")
+            else:
+                self._log("warning", f"回答生成未完成, 长度: {wait_result.get('content_length', 0)} 字符")
 
-            answer_text = ""
-            for selector in answer_selectors:
-                try:
-                    elements = await page.query_selector_all(selector)
-                    if elements:
-                        answer_text = await elements[-1].inner_text()
-                        if answer_text.strip():
-                            break
-                except Exception as e:
-                    logger.debug(f"选择器 {selector} 获取失败: {e}")
-                    continue
+            answer_result = await self.get_answer_content(page, question)
 
-            if not answer_text:
+            if not answer_result["success"]:
+                self._log("warning", "未能获取到AI回答内容")
+
+            answer_text = answer_result.get("answer", "")
+
+            if not answer_text.strip():
                 answer_text = await page.inner_text("body")
+                self._log("info", f"使用页面全文作为回答, 长度: {len(answer_text)}")
 
-            # 9. 检测关键词和公司名
             check_result = self.check_keywords_in_text(answer_text, keyword, company)
 
-            logger.info(f"DeepSeek检测完成: 关键词={check_result['keyword_found']}, 公司={check_result['company_found']}")
+            self._log("info", "检测完成")
+            self._log("info", f"关键词 '{keyword}' 检测结果: {check_result['keyword_found']}")
+            self._log("info", f"公司名 '{company}' 检测结果: {check_result['company_found']}")
+
+            operation_logs = self.get_operation_log()
 
             return {
                 "success": True,
-                "answer": answer_text[:1000],
+                "answer": answer_text[:5000],
                 "keyword_found": check_result["keyword_found"],
                 "company_found": check_result["company_found"],
+                "keyword_count": check_result.get("keyword_count", 0),
+                "company_count": check_result.get("company_count", 0),
+                "confidence": check_result.get("confidence", 0.0),
+                "answer_length": len(answer_text),
+                "wait_info": wait_result,
+                "answer_selector": answer_result.get("selector"),
+                "operation_logs": operation_logs,
                 "error_msg": None
             }
 
         except Exception as e:
-            logger.error(f"DeepSeek检测失败: {e}")
+            self._log("error", f"检测过程发生异常: {e}")
             return {
                 "success": False,
                 "answer": None,

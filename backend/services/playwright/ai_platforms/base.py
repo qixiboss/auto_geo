@@ -5,10 +5,12 @@ AI平台检测器基类
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from playwright.async_api import Page, BrowserContext
 from loguru import logger
 import asyncio
+import time
+import random
 
 
 class AIPlatformChecker(ABC):
@@ -31,6 +33,95 @@ class AIPlatformChecker(ABC):
         self.name = config.get("name", platform_id)
         self.url = config.get("url", "")
         self.color = config.get("color", "#333333")
+        self.retry_count = 3
+        self.retry_delay = 2
+        self.operation_log = []
+
+    def _log(self, level: str, message: str, **kwargs):
+        """
+        增强的日志记录方法
+
+        Args:
+            level: 日志级别 (info, warning, error, debug)
+            message: 日志消息
+            **kwargs: 额外的上下文信息
+        """
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = {
+            "timestamp": timestamp,
+            "platform": self.name,
+            "level": level,
+            "message": message,
+            **kwargs
+        }
+        self.operation_log.append(log_entry)
+
+        if level == "info":
+            logger.info(f"[{self.name}] {message}")
+        elif level == "warning":
+            logger.warning(f"[{self.name}] {message}")
+        elif level == "error":
+            logger.error(f"[{self.name}] {message}")
+        elif level == "debug":
+            logger.debug(f"[{self.name}] {message}")
+
+    async def _retry_operation(
+        self,
+        operation,
+        operation_name: str,
+        max_retries: int = None,
+        retry_delay: int = None
+    ) -> Dict[str, Any]:
+        """
+        通用重试机制
+
+        Args:
+            operation: 异步操作函数
+            operation_name: 操作名称（用于日志）
+            max_retries: 最大重试次数
+            retry_delay: 重试间隔（秒）
+
+        Returns:
+            操作结果
+        """
+        max_retries = max_retries or self.retry_count
+        retry_delay = retry_delay or self.retry_delay
+
+        last_error = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._log("info", f"开始执行: {operation_name} (尝试 {attempt}/{max_retries})")
+                result = await operation()
+
+                if result.get("success"):
+                    self._log("info", f"操作成功: {operation_name}")
+                    return result
+                else:
+                    error_msg = result.get("error_msg", "未知错误")
+                    self._log("warning", f"操作失败: {operation_name}, 错误: {error_msg}")
+
+                    if attempt < max_retries:
+                        delay = retry_delay + random.uniform(0, 1)
+                        self._log("info", f"等待 {delay:.2f} 秒后进行第 {attempt + 1} 次重试")
+                        await asyncio.sleep(delay)
+                    else:
+                        self._log("error", f"操作最终失败: {operation_name}, 错误: {error_msg}")
+                        return result
+
+            except Exception as e:
+                last_error = str(e)
+                self._log("error", f"操作异常: {operation_name}, 错误: {e}")
+
+                if attempt < max_retries:
+                    delay = retry_delay + random.uniform(0, 1)
+                    self._log("info", f"等待 {delay:.2f} 秒后进行第 {attempt + 1} 次重试")
+                    await asyncio.sleep(delay)
+
+        return {
+            "success": False,
+            "error_msg": last_error or f"操作失败，已重试 {max_retries} 次"
+        }
 
     @abstractmethod
     async def check(
@@ -69,77 +160,237 @@ class AIPlatformChecker(ABC):
             是否成功导航
         """
         try:
+            self._log("info", f"正在导航到平台页面: {self.url}")
+
             await page.goto(self.url, wait_until="networkidle", timeout=30000)
-            logger.info(f"导航到AI平台: {self.name}")
-            await asyncio.sleep(2)  # 等待页面完全加载
+
+            self._log("info", f"页面加载完成: {self.name}")
+
+            await asyncio.sleep(2)
+
             return True
         except Exception as e:
-            logger.error(f"导航失败: {self.name}, {e}")
+            self._log("error", f"导航失败: {e}")
             return False
 
     async def wait_for_selector(
         self,
         page: Page,
-        selector: str,
+        selectors: List[str],
         timeout: int = 15000
-    ) -> bool:
+    ) -> tuple:
         """
-        等待选择器出现
+        智能等待选择器出现（支持多个备选选择器）
 
-        注意：AI平台加载慢，需要耐心等待！
+        Args:
+            page: Playwright Page对象
+            selectors: 选择器列表（按优先级排序）
+            timeout: 最大等待时间（毫秒）
+
+        Returns:
+            (成功标志, 匹配到的选择器)
         """
-        try:
-            await page.wait_for_selector(selector, timeout=timeout)
-            return True
-        except Exception:
-            logger.warning(f"等待选择器超时: {selector}")
-            return False
+        start_time = time.time()
+        self._log("info", f"等待选择器: {selectors}, 超时时间: {timeout}ms")
+
+        for selector in selectors:
+            try:
+                self._log("debug", f"尝试选择器: {selector}")
+
+                await page.wait_for_selector(selector, timeout=timeout // len(selectors))
+
+                self._log("info", f"选择器匹配成功: {selector}")
+                return True, selector
+
+            except Exception as e:
+                self._log("debug", f"选择器 {selector} 未找到: {e}")
+                continue
+
+        elapsed_time = (time.time() - start_time) * 1000
+        self._log("warning", f"所有选择器都未找到, 耗时: {elapsed_time:.0f}ms")
+        return False, None
 
     async def wait_for_answer_generation(
         self,
         page: Page,
         initial_content: str,
         selector: str = "body",
-        timeout: int = 30000
-    ) -> bool:
+        timeout: int = 60000,
+        check_interval: float = 1.0
+    ) -> Dict[str, Any]:
         """
-        智能等待AI回答生成完成
+        增强的智能等待AI回答生成完成
 
         Args:
             page: Playwright Page对象
             initial_content: 初始页面内容
             selector: 要监控的选择器
             timeout: 最大等待时间（毫秒）
+            check_interval: 检查间隔（秒）
 
         Returns:
-            是否成功检测到回答生成完成
+            等待结果信息
         """
-        start_time = asyncio.get_event_loop().time()
-        content_changed = False
-        
-        while asyncio.get_event_loop().time() - start_time < timeout / 1000:
-            current_content = await page.inner_text(selector)
-            
-            # 检测内容是否发生变化
-            if current_content != initial_content:
-                content_changed = True
-                # 等待一段时间看是否稳定
-                await asyncio.sleep(3)
-                # 再次检查内容是否稳定
-                final_content = await page.inner_text(selector)
-                if final_content == current_content:
-                    return True
-            
-            await asyncio.sleep(1)
-        
-        return content_changed
+        self._log("info", f"开始智能等待回答生成, 超时时间: {timeout}ms")
+
+        start_time = time.time()
+        last_content = initial_content
+        stable_count = 0
+        required_stable_checks = 3
+        min_content_length = 50
+
+        while (time.time() - start_time) < timeout / 1000:
+            try:
+                current_content = await page.inner_text(selector)
+
+                content_length = len(current_content.strip())
+
+                if content_length > min_content_length and current_content != last_content:
+                    self._log("debug", f"检测到内容更新, 长度: {content_length} 字符")
+
+                    stable_count = 0
+
+                    last_content = current_content
+
+                    await asyncio.sleep(check_interval)
+
+                elif content_length > min_content_length and current_content == last_content:
+                    stable_count += 1
+                    self._log("debug", f"内容稳定检查: {stable_count}/{required_stable_checks}")
+
+                    if stable_count >= required_stable_checks:
+                        elapsed_time = (time.time() - start_time) * 1000
+                        self._log("info", f"回答生成完成, 耗时: {elapsed_time:.0f}ms, 内容长度: {content_length}")
+
+                        return {
+                            "success": True,
+                            "content_length": content_length,
+                            "elapsed_time": elapsed_time,
+                            "stable": True
+                        }
+
+                    await asyncio.sleep(check_interval)
+
+                else:
+                    await asyncio.sleep(check_interval * 0.5)
+
+            except Exception as e:
+                self._log("warning", f"等待回答时发生异常: {e}")
+                await asyncio.sleep(check_interval)
+
+        elapsed_time = (time.time() - start_time) * 1000
+        current_content = await page.inner_text(selector)
+        content_length = len(current_content.strip())
+
+        self._log("warning", f"等待回答超时, 耗时: {elapsed_time:.0f}ms, 内容长度: {content_length}")
+
+        return {
+            "success": content_length > min_content_length,
+            "content_length": content_length,
+            "elapsed_time": elapsed_time,
+            "stable": stable_count >= required_stable_checks
+        }
+
+    async def get_answer_content(
+        self,
+        page: Page,
+        question: str
+    ) -> Dict[str, Any]:
+        """
+        增强的获取AI回答内容
+
+        Args:
+            page: Playwright Page对象
+            question: 用户问题（用于过滤）
+
+        Returns:
+            获取结果
+        """
+        self._log("info", "开始获取AI回答内容")
+
+        answer_selectors = [
+            "[class*='assistant']",
+            "[class*='ai-message']",
+            "[data-role='assistant']",
+            "[class*='answer-content']",
+            "[class*='chat-answer']",
+            ".markdown-body",
+            "[class*='response']",
+            "[class*='result']",
+            "[class*='content-body']"
+        ]
+
+        answer_text = ""
+        matched_selector = None
+
+        for selector in answer_selectors:
+            try:
+                self._log("debug", f"尝试选择器: {selector}")
+
+                elements = await page.query_selector_all(selector)
+
+                if elements:
+                    self._log("debug", f"选择器 {selector} 找到 {len(elements)} 个元素")
+
+                    for element in reversed(elements):
+                        try:
+                            element_text = await element.inner_text()
+                            element_text = element_text.strip()
+
+                            if len(element_text) > 100:
+                                if question not in element_text[:50]:
+                                    answer_text = element_text
+                                    matched_selector = selector
+                                    self._log("info", f"找到AI回答, 选择器: {selector}, 长度: {len(answer_text)}")
+                                    break
+
+                        except Exception as e:
+                            self._log("debug", f"获取元素文本失败: {e}")
+                            continue
+
+                    if answer_text:
+                        break
+
+            except Exception as e:
+                self._log("debug", f"选择器 {selector} 处理失败: {e}")
+                continue
+
+        if not answer_text:
+            self._log("warning", "标准选择器未找到回答, 尝试备用方法")
+
+            page_text = await page.inner_text("body")
+            lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+
+            for line in reversed(lines):
+                if len(line) > 100 and question not in line[:30]:
+                    answer_text = line
+                    matched_selector = "body-text-fallback"
+                    self._log("info", f"使用备用方法找到回答, 长度: {len(answer_text)}")
+                    break
+
+        if answer_text:
+            self._log("info", f"成功获取回答内容, 长度: {len(answer_text)} 字符")
+            return {
+                "success": True,
+                "answer": answer_text[:5000],
+                "selector": matched_selector,
+                "length": len(answer_text)
+            }
+        else:
+            self._log("warning", "未能获取到回答内容")
+            return {
+                "success": False,
+                "answer": "",
+                "selector": None,
+                "length": 0
+            }
 
     def check_keywords_in_text(
         self,
         text: str,
         keyword: str,
         company: str
-    ) -> Dict[str, bool]:
+    ) -> Dict[str, Any]:
         """
         检查文本中是否包含关键词和公司名
 
@@ -149,89 +400,104 @@ class AIPlatformChecker(ABC):
             company: 公司名称
 
         Returns:
-            {keyword_found: bool, company_found: bool}
+            检测结果详细信息
         """
-        # 清理文本，移除多余空格和特殊字符
+        self._log("info", f"开始关键词检测, 文本长度: {len(text)}")
+
         import re
         cleaned_text = re.sub(r'[^\w\s\u4e00-\u9fa5]', ' ', text)
         cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-        
+
         text_lower = cleaned_text.lower()
         keyword_lower = keyword.lower()
         company_lower = company.lower()
-        
-        # 1. 精确匹配检查
-        keyword_exact = keyword_lower in text_lower
-        company_exact = company_lower in text_lower
-        
-        # 2. 部分匹配检查（处理公司名可能的变体）
-        company_parts = [part.strip() for part in company_lower.split() if part.strip()]
-        company_partial = False
-        
-        if len(company_parts) > 1:
-            # 检查公司名的主要部分是否存在
-            main_parts = company_parts[:2]  # 取前两个词作为主要部分
-            company_partial = all(part in text_lower for part in main_parts)
-        
-        # 3. 关键词上下文检查（确保关键词不是在无关的上下文中）
-        keyword_context_found = False
-        if keyword_lower in text_lower:
-            # 查找关键词前后的上下文
-            keyword_index = text_lower.index(keyword_lower)
-            # 取关键词前后各50个字符的上下文
-            start = max(0, keyword_index - 50)
-            end = min(len(text_lower), keyword_index + len(keyword_lower) + 50)
-            context = text_lower[start:end]
-            
-            # 检查上下文是否包含相关词汇（简单示例，可根据需求扩展）
-            relevant_terms = ["什么是", "推荐", "介绍", "哪家", "公司", "品牌", "选择", "对比"]
-            keyword_context_found = any(term in context for term in relevant_terms)
-        
-        # 4. 综合判断
-        keyword_found = keyword_exact and keyword_context_found
-        company_found = company_exact or company_partial
-        
-        # 5. 处理特殊情况：如果文本非常短，放宽条件
-        if len(cleaned_text) < 100:
-            keyword_found = keyword_exact
-            company_found = company_exact
-        
-        return {
-            "keyword_found": keyword_found,
-            "company_found": company_found
+
+        keyword_count = text_lower.count(keyword_lower)
+        company_count = text_lower.count(company_lower)
+
+        keyword_positions = [m.start() for m in re.finditer(re.escape(keyword_lower), text_lower)]
+
+        result = {
+            "keyword_found": keyword_count > 0,
+            "keyword_count": keyword_count,
+            "keyword_positions": keyword_positions[:5],
+            "company_found": company_count > 0,
+            "company_count": company_count,
+            "confidence": 0.0,
+            "reason": ""
         }
+
+        if keyword_count > 0:
+            result["keyword_found"] = True
+            result["confidence"] = min(0.5 + keyword_count * 0.1, 0.9)
+            result["reason"] = f"关键词'{keyword}'出现{keyword_count}次"
+
+        if company_count > 0:
+            result["company_found"] = True
+            result["confidence"] = min(result["confidence"] + 0.2, 0.95)
+            result["reason"] += f", 公司名'{company}'出现{company_count}次"
+
+        if len(cleaned_text) < 100 and keyword_count > 0:
+            result["confidence"] = min(result["confidence"] + 0.1, 0.85)
+
+        self._log("info", f"关键词检测完成: 关键词={result['keyword_found']}({keyword_count}次), "
+                         f"公司={result['company_found']}({company_count}次), "
+                         f"置信度={result['confidence']:.2f}")
+
+        return result
 
     async def clear_chat_history(self, page: Page) -> bool:
         """
         清理聊天历史记录（如果支持）
-        
+
         Returns:
             是否成功清理
         """
+        self._log("info", "尝试清理聊天历史")
+
         try:
-            # 尝试查找清除按钮
-            clear_buttons = [
-                "button[title*='清除']",
-                "button[title*='清空']",
-                "button[aria-label*='清除']",
-                "button[aria-label*='清空']",
-                "[class*='clear'] button",
-                "[class*='reset'] button"
+            clear_selectors = [
+                "[class*='new-chat']",
+                "[class*='new-conversation']",
+                "[class*='clear-history']",
+                "button[title*='新对话']",
+                "[class*='refresh'] button"
             ]
-            
-            for selector in clear_buttons:
-                elements = await page.query_selector_all(selector)
-                if elements:
-                    for element in elements:
-                        try:
-                            await element.click(timeout=5000)
-                            await asyncio.sleep(1)
-                            return True
-                        except Exception:
-                            continue
-            
-            logger.info(f"{self.name} 未找到清除历史按钮，跳过清理")
+
+            for selector in clear_selectors:
+                try:
+                    elements = await page.query_selector_all(selector)
+
+                    if elements:
+                        for element in elements[:1]:
+                            try:
+                                await element.click(timeout=3000)
+                                await asyncio.sleep(1)
+                                self._log("info", f"成功点击清理按钮: {selector}")
+                                return True
+                            except Exception:
+                                continue
+                except Exception:
+                    continue
+
+            self._log("info", "未找到清理按钮或无需清理")
             return True
+
         except Exception as e:
-            logger.error(f"清理聊天历史失败: {self.name}, {e}")
+            self._log("error", f"清理聊天历史失败: {e}")
             return False
+
+    def get_operation_log(self) -> List[Dict]:
+        """
+        获取操作日志
+
+        Returns:
+            操作日志列表
+        """
+        return self.operation_log.copy()
+
+    def clear_operation_log(self):
+        """
+        清空操作日志
+        """
+        self.operation_log.clear()
