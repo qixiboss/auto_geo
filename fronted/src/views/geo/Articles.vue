@@ -19,6 +19,7 @@
             />
           </el-select>
         </el-form-item>
+        
         <el-form-item label="选择关键词">
           <el-select
             v-model="generateForm.keywordId"
@@ -34,6 +35,7 @@
             />
           </el-select>
         </el-form-item>
+        
         <el-form-item label="发布平台">
           <el-select v-model="generateForm.platform" style="width: 150px">
             <el-option label="知乎" value="zhihu" />
@@ -42,6 +44,18 @@
             <el-option label="头条号" value="toutiao" />
           </el-select>
         </el-form-item>
+
+        <!-- 👇 新增：定时发布选择器 -->
+        <el-form-item label="定时发布">
+          <el-date-picker
+            v-model="generateForm.publishTime"
+            type="datetime"
+            placeholder="立即发布 (留空)"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            style="width: 180px"
+          />
+        </el-form-item>
+
         <el-form-item>
           <el-button
             type="primary"
@@ -295,11 +309,12 @@ const showPreviewDialog = ref(false)
 const showEditDialog = ref(false)
 const showQualityDialog = ref(false)
 
-// 生成表单
+// 生成表单 (包含新增的时间字段)
 const generateForm = ref({
   projectId: null as number | null,
   keywordId: null as number | null,
   platform: 'zhihu',
+  publishTime: '' // 新增：定时发布时间
 })
 
 // ==================== 计算属性 ====================
@@ -345,7 +360,7 @@ const loadArticles = async () => {
   }
 }
 
-// 生成文章
+// 生成文章 (核心逻辑更新)
 const generateArticle = async () => {
   if (!generateForm.value.keywordId) {
     ElMessage.warning('请选择关键词')
@@ -358,13 +373,21 @@ const generateArticle = async () => {
     return
   }
 
+  // 安全获取公司名称，防止为空
+  const companyName = project.company_name || project.name || '默认公司'
+
   generating.value = true
   try {
-    const result = await geoArticleApi.generate({
+    // 构造请求参数，包含新增的 publish_time
+    // 注意：这里用了 any 类型转换，是为了兼容 api 定义
+    const payload: any = {
       keyword_id: generateForm.value.keywordId,
-      company_name: project.company_name,
+      company_name: companyName,
       platform: generateForm.value.platform,
-    })
+      publish_time: generateForm.value.publishTime || null
+    }
+
+    const result = await geoArticleApi.generate(payload)
 
     if (result.success) {
       await loadArticles()
@@ -511,6 +534,7 @@ const getReadabilityClass = (score: number) => {
 
 // 格式化日期
 const formatDate = (dateStr: string) => {
+  if (!dateStr) return '-'
   return new Date(dateStr).toLocaleString('zh-CN')
 }
 

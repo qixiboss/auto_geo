@@ -5,9 +5,9 @@
 """
 
 from typing import List, Optional, Any
-from datetime import datetime
+from datetime import datetime  # <--- 必须导入
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -15,7 +15,6 @@ from backend.database.models import Project, Keyword, QuestionVariant
 from backend.services.keyword_service import KeywordService
 from backend.schemas import ApiResponse
 from loguru import logger
-
 
 router = APIRouter(prefix="/api/keywords", tags=["关键词管理"])
 
@@ -36,15 +35,14 @@ class ProjectResponse(BaseModel):
     id: int
     name: str
     company_name: str
-    domain_keyword: Optional[str] = None  # 领域关键词
-    description: Optional[str]
-    industry: Optional[str]
-    status: int
-    created_at: Optional[datetime] = None
+    domain_keyword: Optional[str] = None
+    description: Optional[str] = None
+    industry: Optional[str] = None
+    status: int = 1
 
-    @field_serializer('created_at')
-    def serialize_created_at(self, dt: datetime) -> str:
-        return dt.isoformat() if dt else ""
+    # 🌟 修复点：直接使用 Optional[datetime]，去掉 field_serializer
+    # FastAPI 会自动帮你把 datetime 转成字符串
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -62,13 +60,11 @@ class KeywordResponse(BaseModel):
     id: int
     project_id: int
     keyword: str
-    difficulty_score: Optional[int]
+    difficulty_score: Optional[int] = None
     status: str
-    created_at: Optional[datetime] = None
 
-    @field_serializer('created_at')
-    def serialize_created_at(self, dt: datetime) -> str:
-        return dt.isoformat() if dt else ""
+    # 🌟 修复点
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -85,11 +81,9 @@ class QuestionVariantResponse(BaseModel):
     id: int
     keyword_id: int
     question: str
-    created_at: Optional[datetime] = None
 
-    @field_serializer('created_at')
-    def serialize_created_at(self, dt: datetime) -> str:
-        return dt.isoformat() if dt else ""
+    # 🌟 修复点
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -116,10 +110,10 @@ class GenerateQuestionsRequest(BaseModel):
 async def list_projects(db: Session = Depends(get_db)):
     """
     获取项目列表
-
-    注意：返回所有活跃项目！
     """
-    projects = db.query(Project).filter(Project.status == 1).order_by(Project.created_at.desc()).all()
+    # 兼容性处理：如果数据库里 status 是 null，或者为了保险，只取未删除的
+    # 假设 status=1 是活跃，status=0 是删除
+    projects = db.query(Project).filter(Project.status != 0).order_by(Project.created_at.desc()).all()
     return projects
 
 
@@ -127,15 +121,14 @@ async def list_projects(db: Session = Depends(get_db)):
 async def create_project(project_data: ProjectCreate, db: Session = Depends(get_db)):
     """
     创建项目
-
-    注意：项目是关键词的容器！
     """
     project = Project(
         name=project_data.name,
         company_name=project_data.company_name,
-        domain_keyword=project_data.domain_keyword,  # 保存领域关键词
+        domain_keyword=project_data.domain_keyword,
         description=project_data.description,
-        industry=project_data.industry
+        industry=project_data.industry,
+        status=1  # 默认活跃
     )
     db.add(project)
     db.commit()
@@ -158,8 +151,6 @@ async def get_project(project_id: int, db: Session = Depends(get_db)):
 async def get_project_keywords(project_id: int, db: Session = Depends(get_db)):
     """
     获取项目的所有关键词
-
-    注意：只返回活跃状态的关键词！
     """
     keywords = db.query(Keyword).filter(
         Keyword.project_id == project_id,
@@ -172,21 +163,16 @@ async def get_project_keywords(project_id: int, db: Session = Depends(get_db)):
 
 @router.post("/distill", response_model=ApiResponse)
 async def distill_keywords(
-    request: DistillRequest,
-    db: Session = Depends(get_db)
+        request: DistillRequest,
+        db: Session = Depends(get_db)
 ):
     """
     蒸馏关键词
-
-    调用n8n工作流分析公司信息，返回高价值关键词列表。
-    注意：这是AI驱动的核心功能！
     """
-    # 验证项目存在
     project = db.query(Project).filter(Project.id == request.project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    # 调用关键词服务
     service = KeywordService(db)
     result = await service.distill(
         company_name=request.company_name,
@@ -198,7 +184,6 @@ async def distill_keywords(
     if result.get("status") == "error":
         return ApiResponse(success=False, message=result.get("message", "蒸馏失败"))
 
-    # 保存关键词到数据库
     keywords = result.get("keywords", [])
     saved_keywords = []
     for kw_data in keywords:
@@ -222,28 +207,22 @@ async def distill_keywords(
 
 @router.post("/generate-questions", response_model=ApiResponse)
 async def generate_questions(
-    request: GenerateQuestionsRequest,
-    db: Session = Depends(get_db)
+        request: GenerateQuestionsRequest,
+        db: Session = Depends(get_db)
 ):
     """
     生成问题变体
-
-    基于关键词生成不同的问法，用于后续AI平台收录检测。
-    注意：问题变体越多，检测结果越准确！
     """
-    # 验证关键词存在
     keyword = db.query(Keyword).filter(Keyword.id == request.keyword_id).first()
     if not keyword:
         raise HTTPException(status_code=404, detail="关键词不存在")
 
-    # 调用关键词服务
     service = KeywordService(db)
     questions = await service.generate_questions(
         keyword=keyword.keyword,
         count=request.count
     )
 
-    # 保存问题变体到数据库
     saved_questions = []
     for question in questions:
         qv = service.add_question_variant(
@@ -266,10 +245,7 @@ async def generate_questions(
 async def get_keyword_questions(keyword_id: int, db: Session = Depends(get_db)):
     """
     获取关键词的所有问题变体
-
-    注意：返回值用于AI平台收录检测！
     """
-    # 验证关键词存在
     keyword = db.query(Keyword).filter(Keyword.id == keyword_id).first()
     if not keyword:
         raise HTTPException(status_code=404, detail="关键词不存在")
@@ -284,8 +260,6 @@ async def get_keyword_questions(keyword_id: int, db: Session = Depends(get_db)):
 async def delete_keyword(keyword_id: int, db: Session = Depends(get_db)):
     """
     删除关键词（软删除）
-
-    注意：这是软删除，数据不会真正删除！
     """
     keyword = db.query(Keyword).filter(Keyword.id == keyword_id).first()
     if not keyword:
@@ -300,16 +274,13 @@ async def delete_keyword(keyword_id: int, db: Session = Depends(get_db)):
 
 @router.post("/projects/{project_id}/keywords", response_model=KeywordResponse, status_code=201)
 async def create_keyword(
-    project_id: int,
-    keyword_data: KeywordCreate,
-    db: Session = Depends(get_db)
+        project_id: int,
+        keyword_data: KeywordCreate,
+        db: Session = Depends(get_db)
 ):
     """
     创建关键词
-
-    注意：为指定项目添加新关键词！
     """
-    # 验证项目存在
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -317,7 +288,8 @@ async def create_keyword(
     keyword = Keyword(
         project_id=project_id,
         keyword=keyword_data.keyword,
-        difficulty_score=keyword_data.difficulty_score
+        difficulty_score=keyword_data.difficulty_score,
+        status="active"
     )
     db.add(keyword)
     db.commit()
@@ -329,14 +301,12 @@ async def create_keyword(
 
 @router.put("/projects/{project_id}", response_model=ProjectResponse)
 async def update_project(
-    project_id: int,
-    project_data: ProjectCreate,
-    db: Session = Depends(get_db)
+        project_id: int,
+        project_data: ProjectCreate,
+        db: Session = Depends(get_db)
 ):
     """
     更新项目
-
-    注意：更新项目信息！
     """
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -344,7 +314,7 @@ async def update_project(
 
     project.name = project_data.name
     project.company_name = project_data.company_name
-    project.domain_keyword = project_data.domain_keyword  # 更新领域关键词
+    project.domain_keyword = project_data.domain_keyword
     project.description = project_data.description
     project.industry = project_data.industry
     db.commit()
@@ -358,8 +328,6 @@ async def update_project(
 async def delete_project(project_id: int, db: Session = Depends(get_db)):
     """
     删除项目（软删除）
-
-    注意：这是软删除，数据不会真正删除！
     """
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -376,8 +344,6 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
 async def delete_question(question_id: int, db: Session = Depends(get_db)):
     """
     删除问题变体
-
-    注意：这是永久删除！
     """
     question = db.query(QuestionVariant).filter(QuestionVariant.id == question_id).first()
     if not question:

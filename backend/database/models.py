@@ -233,6 +233,9 @@ class GeoArticle(Base):
     platform = Column(String(50), nullable=True, comment="目标发布平台")
     publish_status = Column(String(20), default="draft", comment="发布状态：draft=草稿 published=已发布 failed=发布失败")
 
+    # 👇👇👇 核心修复：在这里加上这一行 👇👇👇
+    publish_time = Column(DateTime, nullable=True, comment="定时发布时间")
+
     # 时间戳
     created_at = Column(DateTime, default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment="更新时间")

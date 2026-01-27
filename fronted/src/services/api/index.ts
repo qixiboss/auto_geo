@@ -129,7 +129,7 @@ export const accountApi = {
   cancelAuth: (taskId: string) => del<any>(`/accounts/auth/task/${taskId}`),
 }
 
-// ==================== 文章 API ====================
+// ==================== 普通文章 API (基础功能) ====================
 
 export const articleApi = {
   // 获取文章列表
@@ -195,7 +195,6 @@ export const platformApi = {
 export default instance
 
 // ==================== GEO关键词 API ====================
-// 注意：后端路由是 /api/keywords/*，不是 /geo/*
 
 export const geoKeywordApi = {
   // 获取项目列表
@@ -249,7 +248,7 @@ export const geoKeywordApi = {
   deleteQuestion: (questionId: number) => del<any>(`/keywords/questions/${questionId}`),
 }
 
-// ==================== GEO文章 API ====================
+// ==================== GEO文章 API (核心AI功能) ====================
 
 export const geoArticleApi = {
   // 获取GEO文章列表
@@ -259,7 +258,17 @@ export const geoArticleApi = {
   // 获取文章详情
   getDetail: (id: number) => get<any>(`/geo/articles/${id}`),
 
-  // 创建GEO文章
+  // 👇👇👇 生成文章 (带5分钟超时) 👇👇👇
+  generate: (data: { keyword_id: number; company_name: string; platform: string }) => {
+    return post<any>('/geo/generate', data, {
+      timeout: 300000 // 5分钟超时，等待 AI 生成
+    })
+  },
+
+  // 质检文章
+  checkQuality: (id: number) => post<any>(`/geo/articles/${id}/check-quality`),
+
+  // 创建GEO文章 (手动创建)
   create: (data: {
     project_id: number
     keyword_id: number

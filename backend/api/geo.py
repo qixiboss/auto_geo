@@ -5,6 +5,7 @@ GEO文章API
 """
 
 from typing import List, Optional
+from datetime import datetime  # <--- 确保导入
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -14,7 +15,6 @@ from backend.services.geo_article_service import GeoArticleService
 from backend.database.models import GeoArticle
 from backend.schemas import ApiResponse
 from loguru import logger
-
 
 router = APIRouter(prefix="/api/geo", tags=["GEO文章"])
 
@@ -27,20 +27,30 @@ class GenerateArticleRequest(BaseModel):
     company_name: str
     platform: str = "zhihu"
 
+    # 👇 关键新增：接收前端的时间参数
+    publish_time: Optional[datetime] = None
+
 
 class ArticleResponse(BaseModel):
-    """文章响应"""
+    """文章响应 (Pydantic模型)"""
     id: int
     keyword_id: int
-    title: Optional[str]
-    content: str
-    quality_score: Optional[int]
-    ai_score: Optional[int]
-    readability_score: Optional[int]
-    quality_status: str
-    platform: Optional[str]
-    publish_status: str
-    created_at: str
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+    quality_score: Optional[int] = None
+    ai_score: Optional[int] = None
+    readability_score: Optional[int] = None
+
+    quality_status: Optional[str] = "pending"
+    platform: Optional[str] = "zhihu"
+    publish_status: Optional[str] = "draft"
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    # 新增字段的响应
+    publish_time: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -59,11 +69,11 @@ class QualityCheckResponse(BaseModel):
 
 @router.post("/generate", response_model=ApiResponse)
 async def generate_article(
-    request: GenerateArticleRequest,
-    db: Session = Depends(get_db)
+        request: GenerateArticleRequest,
+        db: Session = Depends(get_db)
 ):
     """
-    生成文章
+    生成文章 (支持定时发布)
 
     调用n8n工作流基于关键词生成SEO优化文章。
     注意：这是AI驱动的核心功能！
@@ -72,7 +82,9 @@ async def generate_article(
     result = await service.generate(
         keyword_id=request.keyword_id,
         company_name=request.company_name,
-        platform=request.platform
+        platform=request.platform,
+        # 👇 关键新增：把时间传给 Service 层
+        publish_time=request.publish_time
     )
 
     if result.get("status") == "error":
@@ -83,22 +95,18 @@ async def generate_article(
         message="文章生成成功",
         data={
             "article_id": result.get("article_id"),
-            "title": result.get("title"),
-            "content": result.get("content")
+            "title": result.get("title")
         }
     )
 
 
 @router.post("/articles/{article_id}/check-quality", response_model=ApiResponse)
 async def check_quality(
-    article_id: int,
-    db: Session = Depends(get_db)
+        article_id: int,
+        db: Session = Depends(get_db)
 ):
     """
     质检文章
-
-    调用n8n工作流检测文章的AI味和质量。
-    注意：分数越高表示越像AI写的！
     """
     service = GeoArticleService(db)
     result = await service.check_quality(article_id)
@@ -113,13 +121,19 @@ async def check_quality(
     )
 
 
+# ==================== 文章查询/管理 API ====================
+
 @router.get("/articles/{article_id}", response_model=ArticleResponse)
 async def get_article(article_id: int, db: Session = Depends(get_db)):
-    """获取文章详情"""
+    """
+    获取文章详情
+    """
     service = GeoArticleService(db)
     article = service.get_article(article_id)
+
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
+
     return article
 
 
@@ -127,8 +141,6 @@ async def get_article(article_id: int, db: Session = Depends(get_db)):
 async def get_keyword_articles(keyword_id: int, db: Session = Depends(get_db)):
     """
     获取关键词的所有文章
-
-    注意：返回值按创建时间倒序！
     """
     service = GeoArticleService(db)
     articles = service.get_keyword_articles(keyword_id)
@@ -137,24 +149,22 @@ async def get_keyword_articles(keyword_id: int, db: Session = Depends(get_db)):
 
 @router.put("/articles/{article_id}", response_model=ArticleResponse)
 async def update_article(
-    article_id: int,
-    title: Optional[str] = None,
-    content: Optional[str] = None,
-    db: Session = Depends(get_db)
+        article_id: int,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        db: Session = Depends(get_db)
 ):
     """
     更新文章
-
-    注意：更新后需要重新质检！
     """
     service = GeoArticleService(db)
     article = service.update_article(article_id, title, content)
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
 
-    # 重置质检状态
     article.quality_status = "pending"
     db.commit()
+    db.refresh(article)
 
     return article
 
@@ -163,8 +173,6 @@ async def update_article(
 async def delete_article(article_id: int, db: Session = Depends(get_db)):
     """
     删除文章
-
-    注意：删除会级联删除相关数据！
     """
     article = db.query(GeoArticle).filter(GeoArticle.id == article_id).first()
     if not article:
@@ -179,15 +187,13 @@ async def delete_article(article_id: int, db: Session = Depends(get_db)):
 
 @router.get("/articles", response_model=List[ArticleResponse])
 async def list_articles(
-    keyword_id: Optional[int] = Query(None, description="筛选关键词ID"),
-    quality_status: Optional[str] = Query(None, description="质检状态筛选"),
-    limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db)
+        keyword_id: Optional[int] = Query(None, description="筛选关键词ID"),
+        quality_status: Optional[str] = Query(None, description="质检状态筛选"),
+        limit: int = Query(50, ge=1, le=100),
+        db: Session = Depends(get_db)
 ):
     """
-    获取文章列表
-
-    注意：支持多维度筛选！
+    获取文章列表 (支持筛选)
     """
     query = db.query(GeoArticle)
 

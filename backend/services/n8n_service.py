@@ -14,8 +14,7 @@ from pydantic import BaseModel, Field
 # ==================== 配置 ====================
 
 class N8nConfig:
-    """n8n 配置"""
-    # n8n webhook 基础地址
+    # 🌟 改回正式地址，不带 -test
     WEBHOOK_BASE = "http://localhost:5678/webhook"
 
     # 超时配置
