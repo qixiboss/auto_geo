@@ -23,8 +23,13 @@ from backend.config import (
     APP_NAME, APP_VERSION, DEBUG, HOST, PORT, RELOAD,
     CORS_ORIGINS, PLATFORMS
 )
-from backend.database import init_db, get_db
-from backend.api import account, article, publish, keywords, geo, index_check, reports, notifications, scheduler, knowledge
+# 🌟 修改点：导入 SessionLocal，因为 Scheduler 需要这个工厂来创建数据库连接
+from backend.database import init_db, get_db, SessionLocal
+from backend.api import account, article, publish, keywords, geo, index_check, reports, notifications, scheduler, \
+    knowledge
+
+# 🌟 关键导入：导入定时任务单例
+from backend.services.scheduler_service import get_scheduler_service
 
 
 # ==================== WebSocket连接管理 ====================
@@ -64,29 +69,37 @@ ws_manager = ConnectionManager()  # WebSocket管理器，给个清晰的命名
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时
+    # ---------------- 启动时 ----------------
     logger.info(f"{APP_NAME} v{APP_VERSION} 正在启动...")
     init_db()  # 初始化数据库
 
-    # 设置 account API 的 WebSocket 管理器
+    # 1. 基础配置
     account.set_ws_manager(ws_manager)
-    # 设置 publish API 的 WebSocket 管理器
     publish.set_ws_manager(ws_manager)
-    # 设置 notifications API 的 WebSocket 回调
     notifications.set_ws_callback(ws_manager.broadcast)
 
-    # 导入并启动Playwright（延迟导入）
+    # 2. 初始化 Playwright
     from backend.services.playwright_mgr import playwright_mgr
-    # 设置数据库工厂
     playwright_mgr.set_db_factory(get_db)
-    # 设置WebSocket回调
     playwright_mgr.set_ws_callback(ws_manager.broadcast)
-    # 注意：不在启动时自动启动浏览器，按需启动
+
+    # 🌟 3. 初始化并启动定时任务调度引擎 (核心新增)
+    scheduler_instance = get_scheduler_service()
+    # 注入数据库工厂，这样 Scheduler 在后台线程中才能安全地访问数据库
+    scheduler_instance.set_db_factory(SessionLocal)
+    # 启动引擎（这会自动启动我们刚才写的“每分钟扫描一次”的任务）
+    scheduler_instance.start()
+    logger.info("⏰ 定时任务引擎已在后台启动")
 
     yield
 
-    # 关闭时
+    # ---------------- 关闭时 ----------------
     logger.info("正在关闭服务...")
+
+    # 🌟 停止定时任务引擎 (防止进程残留)
+    scheduler_instance = get_scheduler_service()
+    scheduler_instance.stop()
+
     from backend.services.playwright_mgr import playwright_mgr
     await playwright_mgr.stop()
 
@@ -111,14 +124,14 @@ app.add_middleware(
 # 注册路由
 app.include_router(account.router)
 app.include_router(article.router)
-app.include_router(publish.router)  # 加上发布路由！
-app.include_router(keywords.router)  # 加上关键词路由！
-app.include_router(geo.router)  # 加上GEO文章路由！
-app.include_router(index_check.router)  # 加上收录检测路由！
-app.include_router(reports.router)  # 加上数据报表路由！
-app.include_router(notifications.router)  # 加上预警通知路由！
-app.include_router(scheduler.router)  # 加上定时任务路由！
-app.include_router(knowledge.router)  # 加上知识库路由！
+app.include_router(publish.router)
+app.include_router(keywords.router)
+app.include_router(geo.router)
+app.include_router(index_check.router)
+app.include_router(reports.router)
+app.include_router(notifications.router)
+app.include_router(scheduler.router)
+app.include_router(knowledge.router)
 
 
 # ==================== 基础接口 ====================
@@ -149,11 +162,7 @@ async def get_platforms():
 # ==================== WebSocket ====================
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
-    """
-    WebSocket端点
-
-    注意：用于实时推送发布进度！
-    """
+    """WebSocket端点"""
     if not client_id:
         client_id = str(uuid.uuid4())
 
@@ -162,7 +171,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
     try:
         while True:
             data = await websocket.receive_text()
-            # 处理客户端消息（心跳等）
             logger.debug(f"收到WebSocket消息: {client_id} - {data}")
     except WebSocketDisconnect:
         ws_manager.disconnect(client_id)

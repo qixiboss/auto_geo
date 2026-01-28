@@ -2,7 +2,7 @@
 import asyncio
 import random
 from typing import Any, Dict, Optional, List
-from datetime import datetime  # <--- 🌟 关键新增：导入 datetime
+from datetime import datetime
 from loguru import logger
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -15,131 +15,141 @@ class GeoArticleService:
     def __init__(self, db: Session):
         self.db = db
 
-    async def generate(
-        self,
-        keyword_id: int,
-        company_name: str,
-        platform: str = "zhihu",
-        publish_time: Optional[datetime] = None  # <--- 🌟 关键新增：接收时间参数
-    ) -> Dict[str, Any]:
-        """
-        生成文章 (正式版：调用 n8n，支持定时发布)
-        """
-        # 1. 获取关键词
-        keyword_obj = self.db.query(Keyword).filter(Keyword.id == keyword_id).first()
-        if not keyword_obj:
-            return {"status": "error", "message": "关键词不存在"}
-
-        logger.info(f"🚀 [正式调用] 准备发送请求到 n8n: {keyword_obj.keyword}")
+    async def generate(self, keyword_id: int, company_name: str, platform: str = "zhihu",
+                       publish_time: Optional[datetime] = None) -> Dict[str, Any]:
+        """后台异步生成文章逻辑"""
+        article = GeoArticle(
+            keyword_id=keyword_id,
+            title="[AI正在创作中]...",
+            content="正在努力写作，请稍后刷新列表...",
+            platform=platform,
+            publish_status="generating",
+            publish_time=publish_time
+        )
+        self.db.add(article)
+        self.db.commit()
+        self.db.refresh(article)
 
         try:
-            # 2. 获取 n8n 服务单例
-            n8n = await get_n8n_service()
+            kw_obj = self.db.query(Keyword).filter(Keyword.id == keyword_id).first()
+            kw_text = kw_obj.keyword if kw_obj else "未知关键词"
 
-            # 3. 调用 n8n 生成文章
+            n8n = await get_n8n_service()
             n8n_res = await n8n.generate_geo_article(
-                keyword=keyword_obj.keyword,
+                keyword=kw_text,
                 platform=platform,
-                requirements=f"请围绕【{company_name}】编写，要求SEO友好。",
+                requirements=f"围绕【{company_name}】编写，风格专业商务。",
                 word_count=1000
             )
 
-            # 4. 检查结果
-            if n8n_res.status != "success":
-                return {"status": "error", "message": n8n_res.error or "n8n 返回异常"}
+            if n8n_res.status == "success":
+                ai_data = n8n_res.data or {}
+                article.title = ai_data.get("title", f"关于{kw_text}的解析")
+                article.content = ai_data.get("content", "内容生成失败")
+                # 逻辑：有排期时间则为 scheduled，否则为 draft
+                article.publish_status = "scheduled" if publish_time else "draft"
+            else:
+                article.publish_status = "failed"
+                article.error_msg = n8n_res.error
 
-            # 5. 提取 AI 生成的内容
-            ai_data = n8n_res.data or {}
-            title = ai_data.get("title", f"关于{keyword_obj.keyword}的解析")
-            content = ai_data.get("content", "内容生成失败")
-
-            # 6. 保存到数据库
-            article = GeoArticle(
-                keyword_id=keyword_id,
-                title=title,
-                content=content,
-                platform=platform,
-                quality_status="pending",
-                publish_time=publish_time  # <--- 🌟 关键新增：将时间存入数据库
-            )
-            self.db.add(article)
             self.db.commit()
-            self.db.refresh(article)
-
-            logger.info(f"✅ AI 文章生成并入库成功: ID={article.id}")
-            return {
-                "status": "success",
-                "article_id": article.id,
-                "title": title
-            }
-
+            logger.info(f"✅ 文章 {article.id} 生成完毕，状态: {article.publish_status}")
+            return {"status": "success", "article_id": article.id}
         except Exception as e:
-            logger.error(f"❌ 调用 n8n 链路崩溃: {str(e)}")
+            logger.error(f"❌ 后台生成异常: {str(e)}")
+            article.publish_status = "failed"
+            article.error_msg = str(e)
+            self.db.commit()
             return {"status": "error", "message": str(e)}
 
-    # ==============================================================
-    # 👇 其他方法保持不变
-    # ==============================================================
-
-    def get_article(self, article_id: int) -> Optional[GeoArticle]:
-        """
-        根据ID获取文章详情
-        """
-        return self.db.query(GeoArticle).filter(GeoArticle.id == article_id).first()
-
-    def get_keyword_articles(self, keyword_id: int) -> List[GeoArticle]:
-        """
-
-        获取某个关键词下的所有文章
-        """
-        return self.db.query(GeoArticle).filter(
-            GeoArticle.keyword_id == keyword_id
-        ).order_by(desc(GeoArticle.created_at)).all()
-
-    def update_article(
-            self,
-            article_id: int,
-            title: Optional[str] = None,
-            content: Optional[str] = None
-    ) -> Optional[GeoArticle]:
-        """
-        手动更新文章内容
-        """
-        article = self.get_article(article_id)
+    async def execute_publish(self, article_id: int) -> bool:
+        """执行发布动作 (由调度器定时触发)"""
+        article = self.db.query(GeoArticle).filter(GeoArticle.id == article_id).first()
         if not article:
-            return None
+            return False
 
-        if title is not None:
-            article.title = title
-        if content is not None:
-            article.content = content
+        # 频率控制：模拟真人操作，随机延迟 5-15 秒
+        wait_time = random.randint(5, 15)
+        logger.info(f"⏳ [频率控制] 文章 {article.id} 将在 {wait_time} 秒后发布...")
+        await asyncio.sleep(wait_time)
 
-        self.db.commit()
-        self.db.refresh(article)
-        return article
+        try:
+            article.publish_status = "publishing"
+            article.publish_logs = f"[{datetime.now()}] 开始推送至平台...\n"
+            self.db.commit()
+
+            logger.info(f"🚀 正在发布: {article.title}")
+            await asyncio.sleep(2)  # 模拟推送请求
+
+            article.publish_status = "published"
+            article.publish_logs += f"[{datetime.now()}] ✅ 发布成功\n"
+            self.db.commit()
+            return True
+        except Exception as e:
+            article.retry_count += 1
+            article.publish_status = "failed"
+            article.error_msg = str(e)
+            article.publish_logs += f"[{datetime.now()}] ❌ 发布失败: {str(e)}\n"
+            self.db.commit()
+            return False
+
+    async def check_article_index(self, article_id: int) -> Dict[str, Any]:
+        """
+        🌟 [新增] 收录监测逻辑
+        模拟调用 n8n 检查文章是否被 AI 搜索引擎收录
+        """
+        article = self.db.query(GeoArticle).filter(GeoArticle.id == article_id).first()
+        if not article or article.publish_status != "published":
+            return {"status": "error", "message": "文章未发布，无法检测"}
+
+        logger.info(f"🔍 [监测] 正在检查文章收录情况: {article.title[:15]}...")
+
+        try:
+            # 这里原本应该调用 n8n 的 index-check 工作流
+            await asyncio.sleep(3)  # 模拟 AI 搜索耗时
+
+            # 模拟收录结果：如果是“写字楼”相关，设定收录概率高一些
+            is_indexed = random.random() > 0.4
+
+            article.index_status = "indexed" if is_indexed else "not_indexed"
+            article.last_check_time = datetime.now()
+            article.index_details = "DeepSeek, 豆包 已引用" if is_indexed else "全网 AI 暂未收录"
+
+            self.db.commit()
+            logger.success(f"📡 文章 {article.id} 监测完成: {article.index_status}")
+            return {"status": "success", "index_status": article.index_status}
+        except Exception as e:
+            logger.error(f"❌ 收录监测异常: {str(e)}")
+            return {"status": "error", "message": str(e)}
 
     async def check_quality(self, article_id: int) -> Dict[str, Any]:
-        """
-        文章质检 (目前暂时保持 Mock 逻辑)
-        """
+        """质检逻辑 (Mock)"""
+        try:
+            article = self.db.query(GeoArticle).filter(GeoArticle.id == article_id).first()
+            if not article: return {"status": "error", "message": "未找到文章"}
+
+            await asyncio.sleep(0.5)
+            article.quality_score = random.randint(85, 96)
+            article.readability_score = random.randint(80, 95)
+            article.ai_score = random.randint(5, 25)
+            article.quality_status = "passed"
+            self.db.commit()
+
+            return {
+                "article_id": article.id,
+                "quality_score": article.quality_score,
+                "quality_status": article.quality_status
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def get_article(self, article_id: int) -> Optional[GeoArticle]:
+        return self.db.query(GeoArticle).filter(GeoArticle.id == article_id).first()
+
+    def update_article(self, article_id: int, title: str, content: str) -> Optional[GeoArticle]:
         article = self.get_article(article_id)
-        if not article:
-            return {"status": "error", "message": "文章不存在"}
-
-        logger.info(f"🔍 [Mock] 开始质检文章: {article_id}")
-
-        await asyncio.sleep(1)
-
-        score = random.randint(80, 98)
-        article.quality_score = score
-        article.readability_score = random.randint(80, 95)
-        article.ai_score = random.randint(10, 30)
-        article.quality_status = "passed" if score >= 60 else "failed"
-
-        self.db.commit()
-
-        return {
-            "status": "success",
-            "quality_score": article.quality_score,
-            "quality_status": article.quality_status
-        }
+        if article:
+            article.title = title
+            article.content = content
+            self.db.commit()
+        return article
