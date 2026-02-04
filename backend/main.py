@@ -28,23 +28,13 @@ from backend.config import (
     APP_NAME, APP_VERSION, DEBUG, HOST, PORT, RELOAD,
     CORS_ORIGINS, PLATFORMS
 )
-<<<<<<< HEAD
-from backend.database import init_db, get_db, engine
+from backend.database import init_db, get_db, engine, SessionLocal
 from backend.api import account, article, publish, keywords, geo, index_check, reports, notifications, scheduler, knowledge, upload, candidate, auth
-=======
-from backend.database import init_db, SessionLocal
 
 # 导入服务组件
 from backend.services.websocket_manager import ws_manager
 from backend.services.scheduler_service import get_scheduler_service
 from backend.services.n8n_service import get_n8n_service
-
-# 导入路由
-from backend.api import (
-    account, article, publish, keywords, geo,
-    index_check, reports, notifications, scheduler, knowledge
-)
->>>>>>> origin/master
 
 
 # ==================== 🌟 日志拦截器 (核心监控功能) ====================
@@ -154,7 +144,6 @@ app.add_middleware(
 # 这里合并了所有的路由模块
 app.include_router(account.router)
 app.include_router(article.router)
-<<<<<<< HEAD
 app.include_router(publish.router)  # 加上发布路由！
 app.include_router(keywords.router)  # 加上关键词路由！
 app.include_router(geo.router)  # 加上GEO文章路由！
@@ -166,16 +155,6 @@ app.include_router(knowledge.router)  # 加上知识库路由！
 app.include_router(upload.router)  # 加上文件上传路由！
 app.include_router(candidate.router)  # 加上候选人管理路由！
 app.include_router(auth.router)  # 加上授权路由！
-=======
-app.include_router(publish.router)
-app.include_router(keywords.router)
-app.include_router(geo.router)
-app.include_router(index_check.router)  # 同事新增的收录监控
-app.include_router(reports.router)
-app.include_router(notifications.router)
-app.include_router(scheduler.router)
-app.include_router(knowledge.router)  # 同事新增的知识库
->>>>>>> origin/master
 
 
 # ==================== WebSocket 端点 ====================
