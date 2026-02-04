@@ -152,6 +152,102 @@ export const PLATFORMS: Record<string, PlatformConfig> = {
     },
     limits: { titleLength: [5, 30], contentLength: [0, 50000], imageCount: 100 },
   },
+  wenku: {
+    id: 'wenku',
+    name: '百度文库',
+    code: 'WK',
+    icon: 'wenku.svg',
+    color: '#2932E1',
+    features: { article: true, video: false, image: false, draft: true, schedule: false },
+    auth: {
+      type: 'qrcode',
+      loginUrl: 'https://wenku.baidu.com/nduser/index',
+      checkLoginInterval: 1000,
+      maxWaitTime: 120000,
+    },
+    publish: {
+      entryUrl: 'https://wenku.baidu.com/user/upload',
+      selectors: {
+        title: 'input[placeholder*="标题"], .doc-title-input',
+        content: '.doc-uploader, .upload-area',
+        submit: '.submit-btn, .upload-btn',
+      },
+      waitTimes: { afterLoad: 3000, afterFill: 500, afterSubmit: 5000 },
+    },
+    limits: { titleLength: [1, 50], contentLength: [0, 100000], imageCount: 0 },
+  },
+  penguin: {
+    id: 'penguin',
+    name: '企鹅号',
+    code: 'OM',
+    icon: 'penguin.svg',
+    color: '#1E8AE8',
+    features: { article: true, video: true, image: true, draft: true, schedule: true },
+    auth: {
+      type: 'qrcode',
+      loginUrl: 'https://om.qq.com/userAuth/index',
+      checkLoginInterval: 1000,
+      maxWaitTime: 120000,
+    },
+    publish: {
+      entryUrl: 'https://om.qq.com/article/articlePublish',
+      selectors: {
+        title: 'input[placeholder*="标题"], #title',
+        content: '#ueditor_0, .editor-container',
+        submit: '.btn-publish, .submit',
+      },
+      waitTimes: { afterLoad: 3000, afterFill: 1000, afterSubmit: 5000 },
+    },
+    limits: { titleLength: [5, 30], contentLength: [0, 50000], imageCount: 50 },
+  },
+  weixin: {
+    id: 'weixin',
+    name: '微信公众号',
+    code: 'WX',
+    icon: 'weixin.svg',
+    color: '#07C160',
+    features: { article: true, video: true, image: true, draft: true, schedule: true },
+    auth: {
+      type: 'qrcode',
+      loginUrl: 'https://mp.weixin.qq.com/',
+      checkLoginInterval: 1000,
+      maxWaitTime: 120000,
+    },
+    publish: {
+      entryUrl: 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit',
+      selectors: {
+        title: '#title, .title-input',
+        content: '#ueditor_0, .editor_area',
+        submit: '#js_submit, .btn_submit',
+      },
+      waitTimes: { afterLoad: 3000, afterFill: 1000, afterSubmit: 5000 },
+    },
+    limits: { titleLength: [5, 64], contentLength: [0, 50000], imageCount: 50 },
+  },
+  wangyi: {
+    id: 'wangyi',
+    name: '网易号',
+    code: 'WY',
+    icon: 'wangyi.svg',
+    color: '#E60026',
+    features: { article: true, video: true, image: true, draft: true, schedule: true },
+    auth: {
+      type: 'qrcode',
+      loginUrl: 'https://mp.163.com/login.html',
+      checkLoginInterval: 1000,
+      maxWaitTime: 120000,
+    },
+    publish: {
+      entryUrl: 'https://mp.163.com/admin/article/publish',
+      selectors: {
+        title: 'input[name="title"]',
+        content: '#editor',
+        submit: '.submit-btn',
+      },
+      waitTimes: { afterLoad: 3000, afterFill: 1000, afterSubmit: 5000 },
+    },
+    limits: { titleLength: [5, 30], contentLength: [0, 50000], imageCount: 50 },
+  },
 }
 
 /**

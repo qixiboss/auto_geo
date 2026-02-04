@@ -219,6 +219,10 @@ class PlaywrightManager:
 
         return task
 
+    def get_auth_task(self, task_id: str) -> Optional[AuthTask]:
+        """获取授权任务"""
+        return self._auth_tasks.get(task_id)
+
     async def _finalize_auth(self, task_id: str) -> str:
         """
         核心：提取登录凭证并入库
@@ -236,19 +240,39 @@ class PlaywrightManager:
                 "() => ({ localStorage: {...localStorage}, sessionStorage: {...sessionStorage} })") or {}
 
             # 2. 基础验证
-            # 针对不同平台的关键 Cookie 检查
+            # 针对不同平台的关键 Cookie 检查 (支持多个备选Cookie，用|分隔)
             platform_checks = {
                 "zhihu": "z_c0",
-                "baijiahao": "BDUSS",
-                "toutiao": "sessionid"
+                "baijiahao": "BDUSS|STOKEN",
+                "toutiao": "sessionid|sid_tt",
+                "wenku": "BDUSS|STOKEN",
+                "penguin": "uin|skey|p_skey",
+                "weixin": "data_ticket|slave_user|slave_sid",
+                "wangyi": "NTES_SESS|S_INFO",
+                "sohu": "ppinf|pprdig"
             }
-            key_cookie = platform_checks.get(task.platform)
-            if key_cookie and not any(c['name'] == key_cookie for c in cookies):
-                return json.dumps({"success": False, "message": f"未检测到登录凭证 ({key_cookie})，请先登录"})
+            key_cookie_str = platform_checks.get(task.platform)
+            
+            # 验证逻辑：如果配置了检查项，则必须包含至少一个关键Cookie
+            if key_cookie_str:
+                required_keys = key_cookie_str.split("|")
+                # 检查是否存在任意一个关键Cookie
+                has_auth = any(c['name'] in required_keys for c in cookies)
+                
+                # 特殊处理：企鹅号如果已经进入后台页面，视为成功
+                if task.platform == "penguin" and "om.qq.com" in task.page.url:
+                    has_auth = True
+                    
+                if not has_auth:
+                     return json.dumps({"success": False, "message": f"未检测到登录凭证 (需要包含: {key_cookie_str})，请确认已登录"})
 
             # 3. 提取用户名
-            username = await self._extract_username(task.page, task.platform)
-            logger.info(f"[Auth] 提取到用户名: {username}")
+            try:
+                username = await self._extract_username(task.page, task.platform)
+                logger.info(f"[Auth] 提取到用户名: {username}")
+            except Exception as e:
+                logger.warning(f"[Auth] 提取用户名失败: {e}")
+                username = None
 
             # 4. 数据库操作
             db = self._get_db()
@@ -352,6 +376,48 @@ class PlaywrightManager:
                     if el:
                         text = await el.text_content()
                         if text: return text.strip()
+
+            elif platform == "wenku":
+                selectors = [".user-info-name", ".user-name", ".name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "penguin":
+                selectors = [".header-user-name", ".user-info-name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "weixin":
+                selectors = [".weui-desktop-account__name", ".account_name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "wangyi":
+                # 增加更宽泛的选择器
+                selectors = [".name", ".account-name", ".user-name", ".m-name", ".header-info .name", ".media-info .name", "div[class*='name']"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text and text.strip(): return text.strip()
+
+            elif platform == "sohu":
+                selectors = [".user-name", ".name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
 
             return None
         except:

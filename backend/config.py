@@ -105,6 +105,38 @@ PLATFORMS = {
         "publish_url": "https://mp.toutiao.com/profile/article/article_edit",
         "color": "#333333",
     },
+    "wenku": {
+        "id": "wenku",
+        "name": "百度文库",
+        "code": "WK",
+        "login_url": "https://wenku.baidu.com/nduser/index",
+        "publish_url": "https://wenku.baidu.com/user/upload",
+        "color": "#2932E1",
+    },
+    "penguin": {
+        "id": "penguin",
+        "name": "企鹅号",
+        "code": "OM",
+        "login_url": "https://om.qq.com/userAuth/index",
+        "publish_url": "https://om.qq.com/article/articlePublish",
+        "color": "#1E8AE8",
+    },
+    "weixin": {
+        "id": "weixin",
+        "name": "微信公众号",
+        "code": "WX",
+        "login_url": "https://mp.weixin.qq.com/",
+        "publish_url": "https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit",
+        "color": "#07C160",
+    },
+    "wangyi": {
+        "id": "wangyi",
+        "name": "网易号",
+        "code": "WY",
+        "login_url": "https://mp.163.com/login.html",
+        "publish_url": "https://mp.163.com/admin/article/publish",
+        "color": "#E60026",
+    },
 }
 
 # ==================== 日志配置 ====================
