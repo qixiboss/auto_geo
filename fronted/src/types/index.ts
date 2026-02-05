@@ -5,7 +5,19 @@
 
 // ==================== 平台相关 ====================
 
-export type PlatformId = 'zhihu' | 'baijiahao' | 'sohu' | 'toutiao'
+export type PlatformId =
+  | 'zhihu'
+  | 'baijiahao'
+  | 'sohu'
+  | 'toutiao'
+  | 'wenku'
+  | 'penguin'
+  | 'weixin'
+  | 'wangyi'
+  | 'zijie'
+  | 'xiaohongshu'
+  | 'csdn'
+  | 'juejin'
 
 export interface PlatformConfig {
   id: PlatformId

@@ -242,29 +242,42 @@ class PlaywrightManager:
             # 2. 基础验证
             # 针对不同平台的关键 Cookie 检查 (支持多个备选Cookie，用|分隔)
             platform_checks = {
-                "zhihu": "z_c0",
+                "zhihu": "z_cari0",
                 "baijiahao": "BDUSS|STOKEN",
                 "toutiao": "sessionid|sid_tt",
                 "wenku": "BDUSS|STOKEN",
                 "penguin": "uin|skey|p_skey",
                 "weixin": "data_ticket|slave_user|slave_sid",
                 "wangyi": "NTES_SESS|S_INFO",
-                "sohu": "ppinf|pprdig"
+                "sohu": "ppinf|pprdig",
+                "zijie": "sessionid|sid_tt",
+                "xiaohongshu": "web_session|webId",
+                "csdn": "gt_muid|gt_muid_v2",
+                "juejin": "sessionid|passport_session_id",
             }
             key_cookie_str = platform_checks.get(task.platform)
-            
+
             # 验证逻辑：如果配置了检查项，则必须包含至少一个关键Cookie
+            has_auth = True  # 默认为真，只对有检查要求的平台进行验证
             if key_cookie_str:
                 required_keys = key_cookie_str.split("|")
                 # 检查是否存在任意一个关键Cookie
                 has_auth = any(c['name'] in required_keys for c in cookies)
-                
+
                 # 特殊处理：企鹅号如果已经进入后台页面，视为成功
-                if task.platform == "penguin" and "om.qq.com" in task.page.url:
-                    has_auth = True
-                    
+                if task.platform == "penguin":
+                    current_url = task.page.url
+                    # 检查是否在企鹅号域名下
+                    if "om.qq.com" in current_url:
+                        # 排除登录页
+                        if "userAuth" not in current_url and "login" not in current_url:
+                            has_auth = True
+                            logger.info(f"[Auth] 企鹅号授权成功，当前页面: {current_url}")
+                        else:
+                            has_auth = False
+
                 if not has_auth:
-                     return json.dumps({"success": False, "message": f"未检测到登录凭证 (需要包含: {key_cookie_str})，请确认已登录"})
+                    return json.dumps({"success": False, "message": f"未检测到登录凭证 (需要包含: {key_cookie_str})，请确认已登录"})
 
             # 3. 提取用户名
             try:
@@ -412,6 +425,42 @@ class PlaywrightManager:
 
             elif platform == "sohu":
                 selectors = [".user-name", ".name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "zijie":
+                # 字节号（与头条号相同）
+                selectors = [".user-name", ".name", ".mp-name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "xiaohongshu":
+                # 小红书
+                selectors = [".user-name", ".username", ".name"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "csdn":
+                # CSDN
+                selectors = [".user-nick", ".user-info-name", ".username"]
+                for s in selectors:
+                    el = await page.query_selector(s)
+                    if el:
+                        text = await el.text_content()
+                        if text: return text.strip()
+
+            elif platform == "juejin":
+                # 掘金
+                selectors = [".user-name", ".username", ".profile-name"]
                 for s in selectors:
                     el = await page.query_selector(s)
                     if el:
