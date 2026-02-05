@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Integer, desc, case
 from backend.database import get_db
 from backend.database.models import Project, Keyword, IndexCheckRecord, GeoArticle, Article, PublishRecord, Account, QuestionVariant
+from backend.schemas import ApiResponse
+from loguru import logger
 
 router = APIRouter(prefix="/api/reports", tags=["数据报表"])
 
@@ -432,3 +434,46 @@ async def get_overview(
         "company_found": company_found,
         "overall_hit_rate": overall_hit_rate
     }
+
+
+# ==================== 收录检测相关API ====================
+
+class BatchCheckRequest(BaseModel):
+    """批量收录检测请求"""
+    project_id: int
+    platforms: Optional[List[str]] = None
+
+
+@router.post("/run-check", response_model=ApiResponse)
+async def run_check(
+    request: BatchCheckRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    在数据报表页面执行项目收录收录检测
+    复用 IndexCheckService.check_project_keywords() 方法
+    """
+    from backend.services.index_check_service import IndexCheckService
+
+    # 验证项目存在
+    project = db.query(Project).filter(Project.id == request.project_id).first()
+    if not project:
+        return ApiResponse(success=False, message="项目不存在")
+
+    service = IndexCheckService(db)
+
+    # 执行批量检测（复用收录查询的服务逻辑）
+    try:
+        results = await service.check_project_keywords(
+            project_id=request.project_id,
+            platforms=request.platforms
+        )
+
+        return ApiResponse(
+            success=True,
+            message=f"收录检测完成，共生成 {len(results)} 条检测记录"
+        )
+    except Exception as e:
+        logger.error(f"收录检测失败: {e}")
+        return ApiResponse(success=False, message=f"检测失败: {str(e)}")

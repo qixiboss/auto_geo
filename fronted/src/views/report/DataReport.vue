@@ -27,6 +27,10 @@
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
+        <el-button type="primary" @click="runCheck" :loading="checkLoading">
+          <el-icon><Search /></el-icon>
+          执行收录检测
+        </el-button>
       </div>
     </div>
 
@@ -37,6 +41,9 @@
         <el-tooltip content="统计选定时间范围内的核心指标数据" placement="top">
           <el-icon class="info-icon"><InfoFilled /></el-icon>
         </el-tooltip>
+        <el-button type="text" @click="viewRecords" class="view-link">
+          查看检测记录 <el-icon><ArrowRight /></el-icon>
+        </el-button>
       </div>
       <div class="stats-grid">
         <div class="stat-card blue">
@@ -121,10 +128,16 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { InfoFilled, Refresh } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { InfoFilled, Refresh, Search, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { reportsApi, geoKeywordApi } from '@/services/api'
+
+const router = useRouter()
+
+// 检测加载状态
+const checkLoading = ref(false)
 
 // 筛选状态
 const filters = ref({
@@ -265,6 +278,63 @@ onUnmounted(() => {
     comparisonChart = null
   }
 })
+
+// 执行收录检测
+const runCheck = async () => {
+  if (!filters.value.project_id) {
+    ElMessage.warning('请先选择项目')
+    return
+  }
+
+  checkLoading.value = true
+  try {
+    // 转换平台筛选格式
+    const platforms = convertPlatformFilter(filters.value.platform)
+
+    await reportsApi.runCheck({
+      project_id: filters.value.project_id,
+      platforms: platforms.length > 0 ? platforms : undefined
+    })
+
+    ElMessage.success('收录检测已完成，3秒后自动刷新数据')
+
+    // 延迟期新，等待检测数据写入
+    setTimeout(() => {
+      loadData()
+    }, 3000)
+  } catch (error: any) {
+    console.error('检测失败:', error)
+    ElMessage.error(error.response?.data?.message || '检测失败，请稍后重试')
+  } finally {
+    checkLoading.value = false
+  }
+}
+
+// 平台筛选格式转换（将前端格式转换为后端格式）
+const convertPlatformFilter = (platform: string): string[] => {
+  const platformMap: Record<string, string> = {
+    'DeepSeek': 'deepseek',
+    '豆包': 'doubao',
+    '通义千问': 'qianwen'
+  }
+  return platform ? [platformMap[platform]] : []
+}
+
+// 跳转到收录查询页面查看详细记录
+const viewRecords = () => {
+  if (!filters.value.project_id) {
+    ElMessage.warning('请先选择项目')
+    return
+  }
+
+  router.push({
+    name: 'Monitor',
+    query: {
+      project_id: filters.value.project_id,
+      // 可以传递其他筛选参数
+    }
+  })
+}
 </script>
 
 <style scoped lang="scss">
@@ -331,6 +401,14 @@ onUnmounted(() => {
     margin-bottom: 20px;
     .section-title { margin-bottom: 0; }
     .info-icon { color: var(--text-secondary); cursor: help; }
+    .view-link {
+      margin-left: auto;
+      color: var(--primary);
+      font-size: 14px;
+      &:hover {
+        color: var(--primary-light);
+      }
+    }
   }
 
   .stats-grid {
