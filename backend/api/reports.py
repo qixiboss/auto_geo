@@ -40,13 +40,6 @@ class ProjectRank(BaseModel):
     ai_mention_rate: float
     brand_relevance: float
 
-class ContentAnalysis(BaseModel):
-    rank: int
-    title: str
-    platform: str
-    ai_contribution: float
-    publish_time: Optional[str]
-
 class TrendDataPoint(BaseModel):
     """趋势数据点"""
     date: str
@@ -372,43 +365,6 @@ async def get_project_leaderboard(days: int = Query(7), db: Session = Depends(ge
         item.rank = i + 1
         
     return result[:10]
-
-@router.get("/content-analysis", response_model=List[ContentAnalysis])
-async def get_content_analysis(
-    project_id: Optional[int] = Query(None),
-    days: int = Query(7),
-    platform: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """高贡献内容分析"""
-    start_date = datetime.now() - timedelta(days=days)
-
-    # 结合 Geo只看已发布的
-    query = db.query(GeoArticle).filter(GeoArticle.created_at >= start_date)
-    if project_id:
-        query = query.join(Keyword).filter(Keyword.project_id == project_id)
-
-    if platform:
-        query = query.filter(GeoArticle.platform == platform)
-
-    articles = query.filter(GeoArticle.publish_status == "published").order_by(desc(GeoArticle.created_at)).limit(10).all()
-
-    result = []
-    for i, a in enumerate(articles):
-        # 根据收录状态计算贡献度
-        # 已收录90%，未收录10%
-        contribution = 90.0 if a.index_status == "indexed" else 10.0
-
-        result.append(ContentAnalysis(
-            rank=i + 1,
-            title=a.title or "无标题",
-            platform=a.platform or "未知",
-            ai_contribution=contribution,
-            publish_time=a.publish_time.strftime("%Y-%m-%d %H:%M") if a.publish_time else None
-        ))
-
-    return result
-
 
 @router.get("/overview")
 async def get_overview(

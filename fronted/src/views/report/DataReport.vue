@@ -3,7 +3,7 @@
     <!-- 1. 顶部筛选区 -->
     <div class="filter-section card-box">
       <div class="filter-left">
-        <el-select v-model="filters.project_id" placeholder="选择项目" clearable @change="loadData" class="project-select">
+        <el-select v-model="filters.project_id" placeholder="选择项目" clearable @change="loadData" class="project-select" size="default">
           <el-option
             v-for="item in projects"
             :key="item.id"
@@ -11,7 +11,7 @@
             :value="item.id"
           />
         </el-select>
-        <el-select v-model="filters.days" placeholder="时间范围" @change="loadData" class="time-select">
+        <el-select v-model="filters.days" placeholder="时间范围" @change="loadData" class="time-select" size="default">
           <el-option label="近7天" :value="7" />
           <el-option label="近30天" :value="30" />
         </el-select>
@@ -107,22 +107,6 @@
       </el-table>
     </div>
 
-    <!-- 5. 高贡献内容分析 -->
-    <div class="analysis-section card-box">
-      <h3 class="section-title">高贡献内容分析 (AI引用源)</h3>
-      <el-table :data="contentAnalysis" stripe style="width: 100%" class="dark-table">
-        <el-table-column prop="rank" label="排名" width="80" align="center" />
-        <el-table-column prop="title" label="文章标题" show-overflow-tooltip />
-        <el-table-column prop="platform" label="发布平台" width="120" />
-        <el-table-column prop="ai_contribution" label="AI引用贡献率" width="150" align="center">
-          <template #default="{ row }">{{ row.ai_contribution }}%</template>
-        </el-table-column>
-        <el-table-column prop="publish_time" label="发布时间" width="180" align="center" />
-        <template #empty>
-          <div class="empty-text">暂无数据</div>
-        </template>
-      </el-table>
-    </div>
   </div>
 </template>
 
@@ -167,7 +151,6 @@ const stats = ref({
 
 // 排行榜数据
 const projectLeaderboard = ref<any[]>([])
-const contentAnalysis = ref<any[]>([])
 
 // 图表 DOM
 const comparisonChartRef = ref<HTMLElement | null>(null)
@@ -187,10 +170,6 @@ const loadData = async () => {
     // 加载项目排行
     const leaderboardRes = await reportsApi.getProjectLeaderboard({ days: filters.value.days })
     projectLeaderboard.value = leaderboardRes
-
-    // 加载内容分析
-    const analysisRes = await reportsApi.getContentAnalysis(filters.value)
-    contentAnalysis.value = analysisRes
   } catch (error) {
     console.error('加载报表数据失败:', error)
     ElMessage.error('加载报表数据失败，请稍后重试')
@@ -369,16 +348,26 @@ const viewRecords = () => {
 
   .filter-left {
     display: flex;
+    align-items: center;
     gap: 12px;
 
-    .project-select { width: 200px; }
-    .time-select { width: 120px; }
+    .project-select {
+      width: 200px;
+    }
+    .time-select {
+      width: 120px;
+    }
   }
 
   .filter-right {
     display: flex;
     align-items: center;
     gap: 16px;
+
+    :deep(.el-radio-group),
+    :deep(.el-button) {
+      height: 32px;
+    }
 
     .refresh-btn {
       background: transparent;

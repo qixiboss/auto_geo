@@ -199,9 +199,6 @@ export const reportsApi = {
   // 🌟 [新增] 项目影响力排行榜
   getProjectLeaderboard: (params: { days?: number }) => get('/reports/project-leaderboard', params),
 
-  // 🌟 [新增] 高贡献内容分析
-  getContentAnalysis: (params: { project_id?: number; days?: number }) => get('/reports/content-analysis', params),
-
   // 🌟 [新增] 执行收录检测
   runCheck: (data: { project_id: number; platforms?: string[] }) =>
     post('/reports/run-check', data)
