@@ -213,3 +213,24 @@ class PublishRecordResponse(BaseModel):
     retry_count: int
     created_at: datetime
     published_at: Optional[datetime] = None
+
+
+# ==================== 账号验证相关 ====================
+class AccountCheckResult(BaseModel):
+    """单个账号检测结果"""
+    account_id: int
+    platform: str
+    account_name: str
+    status_before: int
+    is_valid: bool
+    message: str
+    check_time: str
+
+
+class AccountCheckSummary(BaseModel):
+    """批量检测汇总结果"""
+    total: int
+    success: int
+    failed: int
+    results: List[AccountCheckResult]
+    check_time: str
