@@ -25,7 +25,6 @@ declare module 'vue' {
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTag: typeof import('element-plus/es')['ElTag']
-    ElTooltip: typeof import('element-plus/es')['ElTooltip']
     EmptyState: typeof import('./../components/common/EmptyState.vue')['default']
     ErrorBoundary: typeof import('./../components/common/ErrorBoundary.vue')['default']
     KeywordDisplay: typeof import('./../components/business/project/KeywordDisplay.vue')['default']
