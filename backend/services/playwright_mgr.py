@@ -236,8 +236,17 @@ class PlaywrightManager:
         try:
             # 1. 提取 Cookies 和 Storage
             cookies = await task.context.cookies()
-            storage_state = await task.page.evaluate(
+
+            # 获取 localStorage 和 sessionStorage
+            storage_data = await task.page.evaluate(
                 "() => ({ localStorage: {...localStorage}, sessionStorage: {...sessionStorage} })") or {}
+
+            # 构建完整的 storage_state（必须包含 cookies 字段！）
+            storage_state = {
+                "cookies": cookies,
+                "localStorage": storage_data.get("localStorage", {}),
+                "sessionStorage": storage_data.get("sessionStorage", {})
+            }
 
             # 2. 基础验证
             # 针对不同平台的关键 Cookie 检查 (支持多个备选Cookie，用|分隔)
@@ -800,6 +809,11 @@ class PlaywrightManager:
                 try:
                     decrypted = decrypt_storage_state(account.storage_state)
                     state_data = decrypted if decrypted else json.loads(account.storage_state)
+
+                    # 兼容旧数据格式：如果缺少 cookies 字段，从 account.cookies 补充
+                    if isinstance(state_data, dict) and "cookies" not in state_data and account.cookies:
+                        logger.warning(f"storage_state缺少cookies字段，使用独立cookies")
+                        state_data["cookies"] = decrypt_cookies(account.cookies)
                 except:
                     logger.warning(f"账号 {account.account_name} Session 解析失败，尝试裸奔")
 

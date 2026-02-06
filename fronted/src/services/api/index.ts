@@ -78,18 +78,21 @@ export const del = <T = any>(url: string, params?: any, config?: AxiosRequestCon
 export const accountApi = {
   // 获取列表
   getList: (params?: any) => get('/accounts', params),
-  
+
   // 发起授权 (启动浏览器)
   startAuth: (data: any) => post('/accounts/auth/start', data),
-  
+
   // 🌟 [新增] 查询授权状态 (AccountList.vue 轮询需要)
   getAuthStatus: (taskId: string) => get(`/accounts/auth/status/${taskId}`),
-  
+
   // 🌟 [新增] 更新账号备注/名称
   update: (id: number, data: any) => put(`/accounts/${id}`, data),
-  
+
   // 🌟 [新增] 删除账号 (修复之前的报错)
-  delete: (id: number) => del(`/accounts/${id}`)
+  delete: (id: number) => del(`/accounts/${id}`),
+
+  // 检测所有账号授权状态
+  checkAll: () => post('/accounts/check/all')
 }
 
 // ==================== 2. GEO 关键词 API ====================
